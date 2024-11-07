@@ -13,3 +13,9 @@ fn main() {
 pub struct BenioFile {
     fd: RawFd,
 }
+
+impl BenioFile {
+    pub fn raw_fd(&self) -> RawFd {
+        self.fd
+    }
+}

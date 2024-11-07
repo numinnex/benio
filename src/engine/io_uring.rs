@@ -1,4 +1,4 @@
-use super::Engine;
+use super::{resultify, Engine};
 use crate::BenioFile;
 use io_uring::{opcode, types::Fd};
 use std::io;
@@ -14,6 +14,8 @@ impl IoUring {
 }
 
 impl Engine for IoUring {
+    // SAFETY: It's up to user to make sure when this function is called
+    // the SQ is empty and doesn't have any inflight ops.
     fn new_file(&mut self, path: &str) -> io::Result<BenioFile> {
         let cstring = CString::new(path).expect("Failed to convert path to CString");
         let flags = libc::O_CREAT | libc::O_RDWR | libc::O_CREAT | libc::O_DIRECT | libc::O_SYNC;
@@ -29,17 +31,35 @@ impl Engine for IoUring {
                 .expect("Failed to submit OpenAt op, queue is full");
         }
         self.ring.submit_and_wait(1)?;
-        let fd = self
+        let cqe = self
             .ring
             .completion()
             .next()
-            .expect("Failed to reap OpenAt op, queue is empty")
-            .result();
+            .expect("Failed to reap OpenAt op, queue is empty");
+        let fd = resultify(&cqe)?;
 
         Ok(BenioFile { fd })
     }
 
+    // SAFETY: It's up to user to make sure when this function is called
+    // the SQ is empty and doesn't have any inflight ops.
     fn close_file(&mut self, file: BenioFile) -> io::Result<()> {
-        todo!()
+        let fd = file.raw_fd();
+        let close_op = opcode::Close::new(Fd(fd)).build();
+        unsafe {
+            self.ring
+                .submission()
+                .push(&close_op)
+                .expect("Failed to submit OpenAt op, queue is full");
+        }
+        self.ring.submit_and_wait(1)?;
+        let cqe = self
+            .ring
+            .completion()
+            .next()
+            .expect("Failed to reap OpenAt op, queue is empty");
+        let _ = resultify(&cqe)?;
+
+        Ok(())
     }
 }
