@@ -1,23 +1,36 @@
 use super::{resultify, Engine};
+use crate::io_unit::IoUnit;
 use crate::BenioFile;
 use io_uring::{opcode, types::Fd};
-use std::io;
 use std::ffi::CString;
+use std::io;
+
 pub struct IoUring {
     ring: io_uring::IoUring,
+    offset: usize
 }
 
 impl IoUring {
-    pub fn new(queue_depth: u32) -> Self {
-        todo!()
+    fn new(ring: io_uring::IoUring) -> Self {
+        Self {
+            ring,
+            offset: 0
+        }
     }
 }
 
 impl Engine for IoUring {
+    fn init(depth: u32) -> Self {
+        let ring =
+            io_uring::IoUring::new(depth).expect("Failed to create IoUring instance for engine");
+        IoUring::new(ring)
+    }
+
     // SAFETY: It's up to user to make sure when this function is called
     // the SQ is empty and doesn't have any inflight ops.
-    fn new_file(&mut self, path: &str) -> io::Result<BenioFile> {
+    fn open_file(&mut self, path: &str) -> io::Result<BenioFile> {
         let cstring = CString::new(path).expect("Failed to convert path to CString");
+        // TODO configure some of those flags.
         let flags = libc::O_CREAT | libc::O_RDWR | libc::O_CREAT | libc::O_DIRECT | libc::O_SYNC;
         let mode = 0o666; // Default mode
         let openat_op = opcode::OpenAt::new(Fd(libc::AT_FDCWD), cstring.as_c_str().as_ptr())
@@ -30,7 +43,8 @@ impl Engine for IoUring {
                 .push(&openat_op)
                 .expect("Failed to submit OpenAt op, queue is full");
         }
-        self.ring.submit_and_wait(1)?;
+        let result = self.ring.submit_and_wait(1)?;
+        assert!(result > 0);
         let cqe = self
             .ring
             .completion()
@@ -38,7 +52,10 @@ impl Engine for IoUring {
             .expect("Failed to reap OpenAt op, queue is empty");
         let fd = resultify(&cqe)?;
 
-        Ok(BenioFile { fd })
+        Ok(BenioFile {
+            fd,
+            engine_position: 0,
+        })
     }
 
     // SAFETY: It's up to user to make sure when this function is called
@@ -52,7 +69,8 @@ impl Engine for IoUring {
                 .push(&close_op)
                 .expect("Failed to submit OpenAt op, queue is full");
         }
-        self.ring.submit_and_wait(1)?;
+        let result = self.ring.submit_and_wait(1)?;
+        assert!(result > 0);
         let cqe = self
             .ring
             .completion()

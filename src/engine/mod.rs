@@ -1,13 +1,20 @@
 use ::io_uring::cqueue;
-
-use crate::BenioFile;
+use crate::{io_unit::IoUnit, BenioFile};
 use std::io;
 
 pub mod io_uring;
 
+// Potential extra methods to attach.
+// - Init
+// - Submit
+// - Commit
+// - File Stat
 pub trait Engine {
-    fn new_file(&mut self, path: &str) -> io::Result<BenioFile>;
+    fn init(depth: u32) -> Self;
+    fn open_file(&mut self, path: &str) -> io::Result<BenioFile>;
     fn close_file(&mut self, file: BenioFile) -> io::Result<()>;
+    fn queue<const LEN: usize>(io_u: IoUnit<LEN>) -> io::Result<()>;
+    fn commit() -> io::Result<usize>;
 }
 
 #[inline]
